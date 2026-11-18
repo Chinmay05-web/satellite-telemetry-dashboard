@@ -17,7 +17,50 @@ import {
 
 const API_URL = "http://localhost:8080/api";
 
+// Reusable API helper that automatically attaches the JWT access token.
+// Public authentication requests (register/login) should continue using fetch().
+const apiFetch = async (url, options = {}) => {
+  const token = sessionStorage.getItem("orbitlink_token");
+
+  const headers = {
+    ...(options.headers || {})
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(url, {
+    ...options,
+    headers
+  });
+
+  // A protected endpoint returning 401 means the token is invalid or expired.
+  if (response.status === 401) {
+    window.dispatchEvent(new Event("orbitlink:unauthorized"));
+  }
+
+  return response;
+};
+
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(
+    () => Boolean(sessionStorage.getItem("orbitlink_token"))
+  );
+  const [loginForm, setLoginForm] = useState({
+    email: "",
+    password: ""
+  });
+  const [loginSubmitting, setLoginSubmitting] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [authMode, setAuthMode] = useState("login");
+  const [registerForm, setRegisterForm] = useState({
+    name: "",
+    email: "",
+    password: ""
+  });
+  const [registerSubmitting, setRegisterSubmitting] = useState(false);
+  const [authMessage, setAuthMessage] = useState("");
   const [telemetry, setTelemetry] = useState([]);
   const [queue, setQueue] = useState([]);
   const [activePage, setActivePage] = useState("Overview");
@@ -59,10 +102,162 @@ function App() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
+  // Handle login using the public authentication endpoint.
+  const handleLoginFormChange = (event) => {
+    const { name, value } = event.target;
+    setLoginForm((previous) => ({
+      ...previous,
+      [name]: value
+    }));
+  };
+
+  const handleLoginSubmit = async (event) => {
+    event.preventDefault();
+    setLoginError("");
+    setLoginSubmitting(true);
+
+    try {
+      const response = await fetch(`${API_URL}/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          email: loginForm.email.trim(),
+          password: loginForm.password
+        })
+      });
+
+      const responseText = await response.text();
+      let result = {};
+
+      if (responseText) {
+        try {
+          result = JSON.parse(responseText);
+        } catch {
+          result = { message: responseText };
+        }
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          result.message ||
+          result.error ||
+          "Login failed. Please check your email and password."
+        );
+      }
+
+      if (!result.token) {
+        throw new Error("The server did not return an authentication token.");
+      }
+
+      sessionStorage.setItem("orbitlink_token", result.token);
+      setLoginForm({ email: "", password: "" });
+      setLoginError("");
+      setError("");
+      setMessage("");
+      setIsAuthenticated(true);
+    } catch (err) {
+      setLoginError(err.message || "Unable to log in. Please try again.");
+    } finally {
+      setLoginSubmitting(false);
+    }
+  };
+
+  // Handle registration using the public registration endpoint.
+  const handleRegisterFormChange = (event) => {
+    const { name, value } = event.target;
+    setRegisterForm((previous) => ({
+      ...previous,
+      [name]: value
+    }));
+  };
+
+  const handleRegisterSubmit = async (event) => {
+    event.preventDefault();
+    setLoginError("");
+    setAuthMessage("");
+    setRegisterSubmitting(true);
+
+    try {
+      const response = await fetch(`${API_URL}/auth/register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          name: registerForm.name.trim(),
+          email: registerForm.email.trim(),
+          password: registerForm.password
+        })
+      });
+
+      const responseText = await response.text();
+      let result = {};
+      if (responseText) {
+        try {
+          result = JSON.parse(responseText);
+        } catch {
+          result = { message: responseText };
+        }
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          result.message || result.detail || result.error ||
+          "Registration failed. Check your details and try again."
+        );
+      }
+
+      const registeredEmail = registerForm.email.trim();
+      setRegisterForm({ name: "", email: "", password: "" });
+      setLoginForm({ email: registeredEmail, password: "" });
+      setAuthMode("login");
+      setAuthMessage("Account created successfully. Please sign in.");
+    } catch (err) {
+      setLoginError(err.message || "Unable to register. Please try again.");
+    } finally {
+      setRegisterSubmitting(false);
+    }
+  };
+
+  // Clear the current session and return the user to the login page.
+  const clearSession = (reason = "You have been signed out.") => {
+    sessionStorage.removeItem("orbitlink_token");
+    setIsAuthenticated(false);
+    setAuthMode("login");
+    setLoginForm({ email: "", password: "" });
+    setLoginError(reason);
+    setError("");
+    setMessage("");
+    setTelemetry([]);
+    setQueue([]);
+    setHistory([]);
+    setEvaluationHistory([]);
+    setEvaluationResult(null);
+    setLoading(false);
+  };
+
+  const handleLogout = () => {
+    clearSession("You have been signed out successfully.");
+  };
+
+  // Listen for unauthorized responses from any protected API request.
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      clearSession("Your session has expired or is no longer valid. Please sign in again.");
+    };
+
+    window.addEventListener("orbitlink:unauthorized", handleUnauthorized);
+    return () => {
+      window.removeEventListener("orbitlink:unauthorized", handleUnauthorized);
+    };
+  }, []);
+
   // Fetch telemetry records
   const fetchTelemetry = async () => {
     try {
-      const response = await fetch(`${API_URL}/telemetry`);
+      const response = await apiFetch(`${API_URL}/telemetry`);
 
       if (!response.ok) {
         throw new Error("Unable to retrieve telemetry.");
@@ -82,7 +277,7 @@ function App() {
     setQueueLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/queue`);
+      const response = await apiFetch(`${API_URL}/queue`);
 
       if (!response.ok) {
         throw new Error("Unable to retrieve priority queue.");
@@ -98,25 +293,30 @@ function App() {
   };
 
   useEffect(() => {
-  fetchTelemetry();
-  fetchQueue();
-  fetchHistory();
-  fetchEvaluationHistory();
+    if (!isAuthenticated) {
+      setLoading(false);
+      return undefined;
+    }
 
-  const intervalId = setInterval(() => {
     fetchTelemetry();
     fetchQueue();
     fetchHistory();
     fetchEvaluationHistory();
-  }, 10000);
 
-  return () => clearInterval(intervalId);
-  }, []);
+    const intervalId = setInterval(() => {
+      fetchTelemetry();
+      fetchQueue();
+      fetchHistory();
+      fetchEvaluationHistory();
+    }, 10000);
+
+    return () => clearInterval(intervalId);
+  }, [isAuthenticated]);
 
 // Fetch transmission history
 const fetchHistory = async () => {
   try {
-    const response = await fetch(
+    const response = await apiFetch(
       `${API_URL}/transmission/history`
     );
 
@@ -134,7 +334,7 @@ const fetchHistory = async () => {
 
 const fetchEvaluationHistory = async () => {
   try {
-    const response = await fetch(`${API_URL}/priority/history`);
+    const response = await apiFetch(`${API_URL}/priority/history`);
 
     if (!response.ok) {
       throw new Error("Unable to retrieve priority evaluation history.");
@@ -173,7 +373,7 @@ const handlePriorityEvaluationSubmit = async (event) => {
       linkQuality: Number(evaluationForm.linkQuality)
     };
 
-    const response = await fetch(`${API_URL}/priority/evaluate`, {
+    const response = await apiFetch(`${API_URL}/priority/evaluate`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -216,7 +416,7 @@ const handleTelemetrySubmit = async (event) => {
       urgency: formData.urgency
     };
 
-    const response = await fetch(`${API_URL}/telemetry`, {
+    const response = await apiFetch(`${API_URL}/telemetry`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -266,7 +466,7 @@ const handleQueueSubmit = async (event) => {
       linkQuality: Number(queueForm.linkQuality)
     };
 
-    const response = await fetch(`${API_URL}/queue`, {
+    const response = await apiFetch(`${API_URL}/queue`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -327,7 +527,7 @@ const handleFormChange = (event) => {
     setTransmittingId(id);
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_URL}/transmission/${id}`,
         { method: "POST" }
       );
@@ -424,6 +624,153 @@ const priorityColors = {
 };
 
 
+  if (!isAuthenticated) {
+    const isRegistering = authMode === "register";
+
+    return (
+      <div className="auth-page">
+        <section className="auth-card">
+          <div className="auth-brand">
+            <div className="auth-brand-icon">🛰️</div>
+            <div>
+              <h1>OrbitLink</h1>
+              <p>Satellite Control Dashboard</p>
+            </div>
+          </div>
+
+          <div className="auth-heading">
+            <h2>{isRegistering ? "Create your account" : "Welcome back"}</h2>
+            <p>
+              {isRegistering
+                ? "Register to access the satellite telemetry dashboard."
+                : "Sign in to access your satellite telemetry dashboard."}
+            </p>
+          </div>
+
+          {authMessage && !isRegistering && (
+            <div className="auth-success" role="status">{authMessage}</div>
+          )}
+
+          {loginError && (
+            <div className="auth-error" role="alert">{loginError}</div>
+          )}
+
+          {isRegistering ? (
+            <form className="auth-form" onSubmit={handleRegisterSubmit}>
+              <div className="form-group">
+                <label htmlFor="register-name">Full name</label>
+                <input
+                  id="register-name"
+                  type="text"
+                  name="name"
+                  placeholder="Enter your full name"
+                  value={registerForm.name}
+                  onChange={handleRegisterFormChange}
+                  autoComplete="name"
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="register-email">Email address</label>
+                <input
+                  id="register-email"
+                  type="email"
+                  name="email"
+                  placeholder="Enter your email address"
+                  value={registerForm.email}
+                  onChange={handleRegisterFormChange}
+                  autoComplete="email"
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="register-password">Password</label>
+                <input
+                  id="register-password"
+                  type="password"
+                  name="password"
+                  placeholder="Create a password"
+                  value={registerForm.password}
+                  onChange={handleRegisterFormChange}
+                  autoComplete="new-password"
+                  minLength={8}
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="auth-submit-button"
+                disabled={registerSubmitting}
+              >
+                {registerSubmitting ? "Creating account..." : "Create account"}
+              </button>
+            </form>
+          ) : (
+            <form className="auth-form" onSubmit={handleLoginSubmit}>
+              <div className="form-group">
+                <label htmlFor="login-email">Email address</label>
+                <input
+                  id="login-email"
+                  type="email"
+                  name="email"
+                  placeholder="Enter your registered email"
+                  value={loginForm.email}
+                  onChange={handleLoginFormChange}
+                  autoComplete="username"
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="login-password">Password</label>
+                <input
+                  id="login-password"
+                  type="password"
+                  name="password"
+                  placeholder="Enter your password"
+                  value={loginForm.password}
+                  onChange={handleLoginFormChange}
+                  autoComplete="current-password"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="auth-submit-button"
+                disabled={loginSubmitting}
+              >
+                {loginSubmitting ? "Signing in..." : "Sign in"}
+              </button>
+            </form>
+          )}
+
+          <div className="auth-switch">
+            {isRegistering ? "Already have an account?" : "New to OrbitLink?"}
+            <button
+              type="button"
+              className="auth-switch-button"
+              onClick={() => {
+                setAuthMode(isRegistering ? "login" : "register");
+                setLoginError("");
+                setAuthMessage("");
+              }}
+            >
+              {isRegistering ? "Sign in" : "Create an account"}
+            </button>
+          </div>
+
+          <p className="auth-footer">
+            Secure access powered by JWT authentication
+          </p>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       <aside className="sidebar">
@@ -502,6 +849,9 @@ const priorityColors = {
           <span className="connection-dot"></span>
           Backend connection
           <strong>API configured</strong>
+          <button className="logout-button" onClick={handleLogout}>
+            ↪ Sign out
+          </button>
         </div>
       </aside>
 

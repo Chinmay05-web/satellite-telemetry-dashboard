@@ -5,12 +5,12 @@ import com.satellite.dashboard.model.PriorityEvaluation;
 import com.satellite.dashboard.service.PriorityEvaluationService;
 
 import jakarta.validation.Valid;
-
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-
+@SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/priority")
 @CrossOrigin(origins = "http://localhost:5173")

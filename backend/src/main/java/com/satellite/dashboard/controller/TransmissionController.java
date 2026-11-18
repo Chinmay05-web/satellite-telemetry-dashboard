@@ -6,9 +6,9 @@ import com.satellite.dashboard.service.TransmissionService;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import java.util.List;
-
+@SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/transmission")
 @CrossOrigin(origins = "http://localhost:5173")

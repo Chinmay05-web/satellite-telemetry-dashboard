@@ -5,13 +5,14 @@ import com.satellite.dashboard.model.Telemetry;
 import com.satellite.dashboard.service.TelemetryService;
 
 import jakarta.validation.Valid;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-
+@SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/telemetry")
 @CrossOrigin(origins = "http://localhost:5173")
