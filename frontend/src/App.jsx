@@ -22,6 +22,17 @@ function App() {
   const [queue, setQueue] = useState([]);
   const [activePage, setActivePage] = useState("Overview");
   const [history, setHistory] = useState([]);
+  const [evaluationForm, setEvaluationForm] = useState({
+    satelliteId: "",
+    dataType: "SENSOR",
+    urgency: "MEDIUM",
+    batteryLevel: "",
+    linkQuality: ""
+  });
+
+  const [evaluationResult, setEvaluationResult] = useState(null);
+  const [evaluationHistory, setEvaluationHistory] = useState([]);
+  const [evaluationSubmitting, setEvaluationSubmitting] = useState(false);
   const [formData, setFormData] = useState({
   satelliteId: "",
   batteryLevel: "",
@@ -90,15 +101,17 @@ function App() {
   fetchTelemetry();
   fetchQueue();
   fetchHistory();
+  fetchEvaluationHistory();
 
   const intervalId = setInterval(() => {
     fetchTelemetry();
     fetchQueue();
     fetchHistory();
+    fetchEvaluationHistory();
   }, 10000);
 
   return () => clearInterval(intervalId);
-}, []);
+  }, []);
 
 // Fetch transmission history
 const fetchHistory = async () => {
@@ -116,6 +129,74 @@ const fetchHistory = async () => {
 
   } catch (err) {
     setError(err.message);
+  }
+};
+
+const fetchEvaluationHistory = async () => {
+  try {
+    const response = await fetch(`${API_URL}/priority/history`);
+
+    if (!response.ok) {
+      throw new Error("Unable to retrieve priority evaluation history.");
+    }
+
+    const data = await response.json();
+    setEvaluationHistory(Array.isArray(data) ? data : []);
+
+  } catch (err) {
+    setError(err.message);
+  }
+};
+const handleEvaluationFormChange = (event) => {
+  const { name, value } = event.target;
+
+  setEvaluationForm((previous) => ({
+    ...previous,
+    [name]: value
+  }));
+};
+
+const handlePriorityEvaluationSubmit = async (event) => {
+  event.preventDefault();
+
+  setError("");
+  setMessage("");
+  setEvaluationResult(null);
+  setEvaluationSubmitting(true);
+
+  try {
+    const payload = {
+      satelliteId: evaluationForm.satelliteId.trim(),
+      dataType: evaluationForm.dataType,
+      urgency: evaluationForm.urgency,
+      batteryLevel: Number(evaluationForm.batteryLevel),
+      linkQuality: Number(evaluationForm.linkQuality)
+    };
+
+    const response = await fetch(`${API_URL}/priority/evaluate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || "Priority evaluation failed.");
+    }
+
+    const result = await response.json();
+
+    setEvaluationResult(result);
+    setMessage("Priority evaluation completed successfully!");
+
+    await fetchEvaluationHistory();
+
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setEvaluationSubmitting(false);
   }
 };
 
@@ -307,6 +388,7 @@ const handleFormChange = (event) => {
     fetchTelemetry();
     fetchQueue();
     fetchHistory();
+    fetchEvaluationHistory();
   };
 
 // Battery and link-quality chart data
@@ -362,6 +444,7 @@ const priorityColors = {
             "Add Telemetry",
             "Add Queue Item",
             "Priority Queue",
+            "Priority Evaluation",
             "Transmission History"
           ].map((page) => (
             <button
@@ -392,6 +475,7 @@ const priorityColors = {
                 if (page === "Priority Queue") fetchQueue();
                 if (page === "Telemetry") fetchTelemetry();
                 if (page === "Transmission History") fetchHistory();
+                if (page === "Priority Evaluation") fetchEvaluationHistory();
               }}
             >
               <span>
@@ -403,9 +487,11 @@ const priorityColors = {
                       ? "+"
                       : page === "Add Queue Item"
                         ? "＋"
-                        : page === "Priority Queue"
+                        : page === "Priority Queue" 
                           ? "☷"
-                          : "◷"}
+                          : page === "Priority Evaluation" 
+                            ? "✦"
+                            : "◷"}
               </span>
               {page}
             </button>
@@ -966,6 +1052,264 @@ const priorityColors = {
             )}
           </section>
         )}
+
+
+        {activePage === "Priority Evaluation" && (
+          <div className="page-content">
+            <div className="page-header">
+              <div>
+                <h2>Intelligent Priority Evaluation</h2>
+                <p>
+                  Evaluate satellite data and receive an intelligent
+                  transmission priority recommendation.
+                </p>
+              </div>
+            </div>
+
+            <div className="panel form-panel">
+              <div className="panel-header">
+                <h3>Satellite Data Evaluation</h3>
+              </div>
+
+              <form onSubmit={handlePriorityEvaluationSubmit}>
+                <div className="form-grid">
+
+                  <div className="form-group">
+                    <label>Satellite ID</label>
+                    <input
+                      type="text"
+                      name="satelliteId"
+                      placeholder="e.g. SAT-001"
+                      value={evaluationForm.satelliteId}
+                      onChange={handleEvaluationFormChange}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Data Type</label>
+                    <select
+                      name="dataType"
+                      value={evaluationForm.dataType}
+                      onChange={handleEvaluationFormChange}
+                      required
+                    >
+                      <option value="EMERGENCY">EMERGENCY</option>
+                      <option value="SENSOR">SENSOR</option>
+                      <option value="IMAGE">IMAGE</option>
+                      <option value="HOUSEKEEPING">HOUSEKEEPING</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Urgency</label>
+                    <select
+                      name="urgency"
+                      value={evaluationForm.urgency}
+                      onChange={handleEvaluationFormChange}
+                      required
+                    >
+                      <option value="CRITICAL">CRITICAL</option>
+                      <option value="HIGH">HIGH</option>
+                      <option value="MEDIUM">MEDIUM</option>
+                      <option value="LOW">LOW</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Battery Level (%)</label>
+                    <input
+                      type="number"
+                      name="batteryLevel"
+                      placeholder="Enter 0–100"
+                      min="0"
+                      max="100"
+                      value={evaluationForm.batteryLevel}
+                      onChange={handleEvaluationFormChange}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Link Quality (%)</label>
+                    <input
+                      type="number"
+                      name="linkQuality"
+                      placeholder="Enter 0–100"
+                      min="0"
+                      max="100"
+                      value={evaluationForm.linkQuality}
+                      onChange={handleEvaluationFormChange}
+                      required
+                    />
+                  </div>
+
+                </div>
+
+                <div className="form-actions">
+                  <button
+                    type="submit"
+                    className="submit-button"
+                    disabled={evaluationSubmitting}
+                  >
+                    {evaluationSubmitting
+                      ? "Evaluating..."
+                      : "Evaluate Priority"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="cancel-button"
+                    onClick={() => {
+                      setEvaluationForm({
+                        satelliteId: "",
+                        dataType: "SENSOR",
+                        urgency: "MEDIUM",
+                        batteryLevel: "",
+                        linkQuality: ""
+                      });
+                      setEvaluationResult(null);
+                      setError("");
+                      setMessage("");
+                    }}
+                  >
+                    Reset
+                  </button>
+                </div>
+              </form>
+            </div>
+            {evaluationResult && (
+              <div className="panel">
+                <div className="panel-header">
+                  <h3>Priority Evaluation Result</h3>
+                  <span className="status status-ACTIVE">
+                    Evaluation Complete
+                  </span>
+                </div>
+
+                <div className="stats-grid">
+                  <div className="stat-card">
+                    <span className="stat-label">Priority Score</span>
+                    <h2>
+                      {evaluationResult.priorityScore ?? "N/A"}
+                    </h2>
+                  </div>
+
+                  <div className="stat-card">
+                    <span className="stat-label">Recommended Priority</span>
+                    <h2 className={`priority priority-${String(
+                      evaluationResult.priority || ""
+                    ).toLowerCase()}`}>
+                      {evaluationResult.priority || "N/A"}
+                    </h2>
+                  </div>
+
+                  <div className="stat-card">
+                    <span className="stat-label">Transmission Status</span>
+                    <h2 className={`status status-${String(
+                      evaluationResult.transmissionStatus || ""
+                    ).toLowerCase()}`}>
+                      {evaluationResult.transmissionStatus || "N/A"}
+                    </h2>
+                  </div>
+                </div>
+
+                <div className="evaluation-details">
+                  <p>
+                    <strong>Satellite ID:</strong>{" "}
+                    {evaluationResult.satelliteId}
+                  </p>
+
+                  <p>
+                    <strong>Evaluation Time:</strong>{" "}
+                    {evaluationResult.createdAt
+                      ? new Date(evaluationResult.createdAt).toLocaleString()
+                      : "Not available"}
+                  </p>
+
+                  <div className="explanation-box">
+                    <h4>Recommendation Explanation</h4>
+                    <p>{evaluationResult.explanation || "No explanation available."}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="panel">
+              <div className="panel-header">
+                <h3>Priority Evaluation History</h3>
+
+                <button
+                  className="refresh-button"
+                  onClick={fetchEvaluationHistory}
+                >
+                  Refresh History
+                </button>
+              </div>
+
+              {evaluationHistory.length === 0 ? (
+                <p className="empty-message">
+                  No priority evaluations found.
+                </p>
+              ) : (
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Satellite ID</th>
+                        <th>Data Type</th>
+                        <th>Urgency</th>
+                        <th>Battery</th>
+                        <th>Link Quality</th>
+                        <th>Score</th>
+                        <th>Priority</th>
+                        <th>Status</th>
+                        <th>Evaluation Time</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {evaluationHistory.map((item) => (
+                        <tr key={item.id}>
+                          <td>{item.satelliteId}</td>
+                          <td>{item.dataType}</td>
+                          <td>{item.urgency}</td>
+                          <td>{item.batteryLevel}%</td>
+                          <td>{item.linkQuality}%</td>
+                          <td>{item.priorityScore}</td>
+
+                          <td>
+                            <span className={`priority priority-${String(
+                              item.priority || ""
+                            ).toLowerCase()}`}>
+                              {item.priority}
+                            </span>
+                          </td>
+
+                          <td>
+                            <span className={`status status-${String(
+                              item.transmissionStatus || ""
+                            ).toLowerCase()}`}>
+                              {item.transmissionStatus}
+                            </span>
+                          </td>
+
+                          <td>
+                            {item.createdAt
+                              ? new Date(item.createdAt).toLocaleString()
+                              : "N/A"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+          </div>
+        )}
+
 
           {activePage === "Transmission History" && (
             <section className="panel">
